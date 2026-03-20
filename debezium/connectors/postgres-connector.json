@@ -1,75 +1,29 @@
 {
   "name": "postgres-cdc-connector",
   "config": {
-    "connector.class":              "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max":                    "1",
-
-    "database.hostname":            "postgres",
-    "database.port":                "5432",
-    "database.user":                "replicator",
-    "database.password":            "${file:/opt/kafka/secrets/db.properties:db.password}",
-    "database.dbname":              "cdc_db",
-    "database.server.name":         "cdc_db",
-
-    "plugin.name":                  "pgoutput",
-    "publication.name":             "cdc_publication",
-    "slot.name":                    "debezium_slot",
-
-    "table.include.list":           "public.customers,public.products,public.orders,public.order_items",
-
-    "topic.prefix":                 "cdc",
-    "topic.creation.enable":        "true",
-    "topic.creation.default.replication.factor": "3",
-    "topic.creation.default.partitions": "6",
-    "topic.creation.default.cleanup.policy": "delete",
-    "topic.creation.default.retention.ms": "604800000",
-
-    "key.converter":                "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "http://schema-registry:8081",
-    "value.converter":              "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "http://schema-registry:8081",
-
-    "transforms":                   "unwrap,addMetadata,routeByOp",
-
-    "transforms.unwrap.type":       "io.debezium.transforms.ExtractNewRecordState",
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "cdc_user",
+    "database.password": "change_me_in_production",
+    "database.dbname": "cdc_db",
+    "database.server.name": "cdc_db",
+    "plugin.name": "pgoutput",
+    "publication.name": "cdc_publication",
+    "slot.name": "debezium_slot",
+    "topic.prefix": "cdc",
+    "table.include.list": "public.customers,public.products,public.orders,public.order_items",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
     "transforms.unwrap.delete.handling.mode": "rewrite",
-    "transforms.unwrap.add.fields": "op,table,source.ts_ms,source.lsn",
-    "transforms.unwrap.add.headers": "op",
-
-    "transforms.addMetadata.type":  "org.apache.kafka.connect.transforms.InsertField$Value",
-    "transforms.addMetadata.static.field": "pipeline",
-    "transforms.addMetadata.static.value": "cdc-v1",
-
-    "transforms.routeByOp.type":    "io.debezium.transforms.ContentBasedRouter",
-
-    "heartbeat.interval.ms":        "10000",
-    "heartbeat.action.query":       "UPDATE public.debezium_heartbeat SET last_heartbeat = now() WHERE id = 1",
-
-    "snapshot.mode":                "initial",
-    "snapshot.isolation.mode":      "repeatable_read",
-    "snapshot.fetch.size":          "10240",
-    "incremental.snapshot.enabled": "true",
-    "incremental.snapshot.chunk.size": "1024",
-
-    "max.batch.size":               "8192",
-    "max.queue.size":               "32768",
-    "poll.interval.ms":             "500",
-
-    "decimal.handling.mode":        "double",
-    "time.precision.mode":          "connect",
-    "timestamp.converter.type":     "io.debezium.time.ZonedTimestamp",
-
-    "errors.tolerance":             "all",
-    "errors.log.enable":            "true",
-    "errors.log.include.messages":  "true",
-    "errors.deadletterqueue.topic.name": "_cdc_dlq",
-    "errors.deadletterqueue.topic.replication.factor": "3",
-    "errors.deadletterqueue.context.headers.enable": "true",
-
-    "producer.override.acks":       "all",
-    "producer.override.compression.type": "lz4",
-    "producer.override.linger.ms":  "20",
-    "producer.override.batch.size": "131072"
+    "transforms.unwrap.add.fields": "op,table,source.ts_ms",
+    "snapshot.mode": "initial",
+    "heartbeat.interval.ms": "10000"
   }
 }
