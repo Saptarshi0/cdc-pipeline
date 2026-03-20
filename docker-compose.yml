@@ -1,0 +1,304 @@
+version: "3.9"
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  cdc-net:
+    driver: bridge
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+  kafka-data-1:
+  kafka-data-2:
+  kafka-data-3:
+  zookeeper-data:
+  zookeeper-log:
+  schema-registry-data:
+  connect-data:
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL (source) ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cdc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-cdc_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cdc_secret}
+      POSTGRES_DB:       ${POSTGRES_DB:-cdc_db}
+    command: >
+      postgres
+        -c wal_level=logical
+        -c max_replication_slots=10
+        -c max_wal_senders=10
+        -c wal_keep_size=1024
+        -c log_replication_commands=on
+        -c shared_preload_libraries=pg_stat_statements
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cdc_user} -d ${POSTGRES_DB:-cdc_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cdc-net
+
+  # ── Zookeeper ─────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: cdc-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME:   2000
+      ZOOKEEPER_SYNC_LIMIT:  2
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - cdc-net
+
+  # ── Kafka Broker 1 ────────────────────────────────────────────────────────
+  kafka-1:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: cdc-kafka-1
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID:                        1
+      KAFKA_ZOOKEEPER_CONNECT:                zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://kafka-1:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR:       3
+      KAFKA_MIN_INSYNC_REPLICAS:              2
+      KAFKA_LOG_RETENTION_HOURS:              168        # 7 days
+      KAFKA_LOG_RETENTION_BYTES:              10737418240 # 10 GB per partition
+      KAFKA_LOG_SEGMENT_BYTES:                1073741824  # 1 GB
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"
+      KAFKA_NUM_PARTITIONS:                   6
+      KAFKA_COMPRESSION_TYPE:                 lz4
+      KAFKA_JMX_PORT:                         9101
+      KAFKA_JMX_HOSTNAME:                     kafka-1
+    volumes:
+      - kafka-data-1:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+      - "9101:9101"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - cdc-net
+
+  # ── Kafka Broker 2 ────────────────────────────────────────────────────────
+  kafka-2:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: cdc-kafka-2
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID:                        2
+      KAFKA_ZOOKEEPER_CONNECT:                zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://kafka-2:9092,PLAINTEXT_HOST://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR:       3
+      KAFKA_MIN_INSYNC_REPLICAS:              2
+      KAFKA_LOG_RETENTION_HOURS:              168
+      KAFKA_LOG_RETENTION_BYTES:              10737418240
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"
+      KAFKA_NUM_PARTITIONS:                   6
+      KAFKA_COMPRESSION_TYPE:                 lz4
+      KAFKA_JMX_PORT:                         9102
+      KAFKA_JMX_HOSTNAME:                     kafka-2
+    volumes:
+      - kafka-data-2:/var/lib/kafka/data
+    ports:
+      - "29093:29093"
+      - "9102:9102"
+    networks:
+      - cdc-net
+
+  # ── Kafka Broker 3 ────────────────────────────────────────────────────────
+  kafka-3:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: cdc-kafka-3
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID:                        3
+      KAFKA_ZOOKEEPER_CONNECT:                zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://kafka-3:9092,PLAINTEXT_HOST://localhost:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR:       3
+      KAFKA_MIN_INSYNC_REPLICAS:              2
+      KAFKA_LOG_RETENTION_HOURS:              168
+      KAFKA_LOG_RETENTION_BYTES:              10737418240
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"
+      KAFKA_NUM_PARTITIONS:                   6
+      KAFKA_COMPRESSION_TYPE:                 lz4
+      KAFKA_JMX_PORT:                         9103
+      KAFKA_JMX_HOSTNAME:                     kafka-3
+    volumes:
+      - kafka-data-3:/var/lib/kafka/data
+    ports:
+      - "29094:29094"
+      - "9103:9103"
+    networks:
+      - cdc-net
+
+  # ── Schema Registry ───────────────────────────────────────────────────────
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: cdc-schema-registry
+    restart: unless-stopped
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME:                    schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      SCHEMA_REGISTRY_LISTENERS:                    http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_COMPATIBILITY_LEVEL:          BACKWARD
+    volumes:
+      - schema-registry-data:/var/lib/schema-registry
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - cdc-net
+
+  # ── Kafka Connect (Debezium) ──────────────────────────────────────────────
+  kafka-connect:
+    image: debezium/connect:2.6
+    container_name: cdc-kafka-connect
+    restart: unless-stopped
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+      - schema-registry
+      - postgres
+    environment:
+      BOOTSTRAP_SERVERS:              kafka-1:9092,kafka-2:9092,kafka-3:9092
+      GROUP_ID:                       cdc-connect-group
+      CONFIG_STORAGE_TOPIC:           _cdc_connect_configs
+      OFFSET_STORAGE_TOPIC:           _cdc_connect_offsets
+      STATUS_STORAGE_TOPIC:           _cdc_connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      STATUS_STORAGE_REPLICATION_FACTOR: 3
+      KEY_CONVERTER:                  io.confluent.connect.avro.AvroConverter
+      VALUE_CONVERTER:                io.confluent.connect.avro.AvroConverter
+      KEY_CONVERTER_SCHEMA_REGISTRY_URL:   http://schema-registry:8081
+      VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_PLUGIN_PATH:            /kafka/connect,/debezium-connector-postgres
+      # Dead Letter Queue
+      ERRORS_TOLERANCE:               all
+      ERRORS_DEADLETTERQUEUE_TOPIC_NAME: _cdc_dlq
+      ERRORS_DEADLETTERQUEUE_CONTEXT_HEADERS_ENABLE: "true"
+      # JMX monitoring
+      KAFKA_JMX_PORT:                 9584
+      KAFKA_JMX_HOSTNAME:             kafka-connect
+    volumes:
+      - connect-data:/kafka/connect
+    ports:
+      - "8083:8083"
+      - "9584:9584"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - cdc-net
+
+  # ── Kafka UI ──────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: cdc-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka-1
+      - schema-registry
+      - kafka-connect
+    environment:
+      KAFKA_CLUSTERS_0_NAME:                    cdc-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS:        kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY:          http://schema-registry:8081
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME:     debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS:  http://kafka-connect:8083
+      DYNAMIC_CONFIG_ENABLED:                   "true"
+    ports:
+      - "8080:8080"
+    networks:
+      - cdc-net
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: cdc-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - cdc-net
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.3
+    container_name: cdc-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - cdc-net
+
+  # ── JMX Exporter (Kafka metrics → Prometheus) ─────────────────────────────
+  jmx-exporter-kafka:
+    image: bitnami/jmx-exporter:0.20.0
+    container_name: cdc-jmx-exporter
+    restart: unless-stopped
+    command: ["5556", "/opt/jmx-exporter/config.yml"]
+    environment:
+      JMX_HOST: kafka-1
+      JMX_PORT: "9101"
+    ports:
+      - "5556:5556"
+    networks:
+      - cdc-net

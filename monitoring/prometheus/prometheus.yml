@@ -1,0 +1,25 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: cdc-pipeline
+    env:     production
+
+scrape_configs:
+
+  - job_name: kafka-jmx
+    static_configs:
+      - targets: ["jmx-exporter-kafka:5556"]
+
+  - job_name: kafka-connect
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["kafka-connect:9584"]
+
+  - job_name: cdc-consumer
+    static_configs:
+      - targets: ["cdc-consumer:9100"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

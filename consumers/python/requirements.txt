@@ -1,0 +1,2 @@
+confluent-kafka[avro,schemaregistry]==2.3.0
+prometheus-client==0.20.0
